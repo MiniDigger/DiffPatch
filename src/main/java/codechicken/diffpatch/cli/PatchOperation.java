@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static codechicken.diffpatch.util.Utils.*;
@@ -38,12 +39,14 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
     private final PatchMode mode;
     private final String patchesPrefix;
     private final String lineEnding;
+    private final Pattern ignorePattern;
 
     @Deprecated
     public PatchOperation(PrintStream logger, Consumer<PrintStream> helpCallback, boolean verbose, boolean summary, InputPath basePath, InputPath patchesPath, String aPrefix, String bPrefix, OutputPath outputPath, OutputPath rejectsPath, float minFuzz, int maxOffset, PatchMode mode, String patchesPrefix) {
-        this(logger, helpCallback, verbose, summary, basePath, patchesPath, aPrefix, bPrefix, outputPath, rejectsPath, minFuzz, maxOffset, mode, patchesPrefix, System.lineSeparator());
+        this(logger, helpCallback, verbose, summary, basePath, patchesPath, aPrefix, bPrefix, outputPath, rejectsPath, minFuzz, maxOffset, mode, patchesPrefix, System.lineSeparator(), null);
     }
-    private PatchOperation(PrintStream logger, Consumer<PrintStream> helpCallback, boolean verbose, boolean summary, InputPath basePath, InputPath patchesPath, String aPrefix, String bPrefix, OutputPath outputPath, OutputPath rejectsPath, float minFuzz, int maxOffset, PatchMode mode, String patchesPrefix, String lineEnding) {
+
+    private PatchOperation(PrintStream logger, Consumer<PrintStream> helpCallback, boolean verbose, boolean summary, InputPath basePath, InputPath patchesPath, String aPrefix, String bPrefix, OutputPath outputPath, OutputPath rejectsPath, float minFuzz, int maxOffset, PatchMode mode, String patchesPrefix, String lineEnding, Pattern ignorePattern) {
         super(logger, helpCallback, verbose);
         this.summary = summary;
         this.basePath = basePath;
@@ -57,6 +60,7 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
         this.mode = mode;
         this.patchesPrefix = patchesPrefix;
         this.lineEnding = lineEnding;
+        this.ignorePattern = ignorePattern;
     }
 
     public static Builder builder() {
@@ -261,6 +265,7 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
 
     public boolean doPatch(FileCollector oCollector, FileCollector rCollector, PatchesSummary summary, Set<String> bEntries, Set<String> pEntries, Function<String, List<String>> bFunc, Function<String, List<String>> pFunc, float minFuzz, int maxOffset, PatchMode mode) {
         Map<String, PatchFile> patchFiles = pEntries.stream()
+                .filter(this::shouldPatch)
                 .map(e -> PatchFile.fromLines(e, pFunc.apply(e), true))
                 .collect(Collectors.toMap(e -> {
                             if (e.patchedPath == null) {
@@ -274,7 +279,7 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
                         },
                         Function.identity()));
 
-        List<String> notPatched = bEntries.stream().filter(e -> !patchFiles.containsKey(e)).sorted().collect(Collectors.toList());
+        List<String> notPatched = bEntries.stream().filter(this::shouldPatch).filter(e -> !patchFiles.containsKey(e)).sorted().collect(Collectors.toList());
         List<String> patchedFiles = bEntries.stream().filter(patchFiles::containsKey).sorted().collect(Collectors.toList());
         List<String> removedFiles = patchFiles.keySet().stream().filter(e -> !bEntries.contains(e)).sorted().collect(Collectors.toList());
 
@@ -448,6 +453,14 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
         return String.join(lineEnding + lines) + lineEnding;
     }
 
+    private boolean shouldPatch(String file) {
+        if (ignorePattern != null && ignorePattern.matcher(file).matches()) {
+            verbose("Ignoring %s", file);
+            return false;
+        }
+        return true;
+    }
+
     public static class PatchesSummary {
 
         public int unchangedFiles;
@@ -500,6 +513,7 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
         private String aPrefix = "a/";
         private String bPrefix = "b/";
         private String lineEnding = System.lineSeparator();
+        private Pattern ignorePattern;
 
         private Builder() {
         }
@@ -633,6 +647,16 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
             return this;
         }
 
+        public Builder ignorePattern(String regex) {
+            this.ignorePattern = Pattern.compile(regex);
+            return this;
+        }
+
+        public Builder ignorePattern(Pattern pattern) {
+            this.ignorePattern = pattern;
+            return this;
+        }
+
         public PatchOperation build() {
             if (basePath == null) {
                 throw new IllegalStateException("basePath not set.");
@@ -643,7 +667,7 @@ public class PatchOperation extends CliOperation<PatchOperation.PatchesSummary> 
             if (outputPath == null) {
                 throw new IllegalStateException("output not set.");
             }
-            return new PatchOperation(logger, helpCallback, verbose, summary, basePath, patchesPath, aPrefix, bPrefix, outputPath, rejectsPath, minFuzz, maxOffset, mode, patchesPrefix, lineEnding);
+            return new PatchOperation(logger, helpCallback, verbose, summary, basePath, patchesPath, aPrefix, bPrefix, outputPath, rejectsPath, minFuzz, maxOffset, mode, patchesPrefix, lineEnding, ignorePattern);
         }
 
     }

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static codechicken.diffpatch.util.Utils.*;
@@ -34,13 +35,14 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
     private final int context;
     private final OutputPath outputPath;
     private final String lineEnding;
+    private final Pattern ignorePattern;
 
     @Deprecated
     public DiffOperation(PrintStream logger, Consumer<PrintStream> helpCallback, boolean verbose, boolean summary, InputPath aPath, InputPath bPath, String aPrefix, String bPrefix, boolean autoHeader, int context, OutputPath outputPath) {
-        this(logger, helpCallback, verbose, summary, aPath, bPath, aPrefix, bPrefix, autoHeader, context, outputPath, System.lineSeparator());
+        this(logger, helpCallback, verbose, summary, aPath, bPath, aPrefix, bPrefix, autoHeader, context, outputPath, System.lineSeparator(), null);
     }
 
-    private DiffOperation(PrintStream logger, Consumer<PrintStream> helpCallback, boolean verbose, boolean summary, InputPath aPath, InputPath bPath, String aPrefix, String bPrefix, boolean autoHeader, int context, OutputPath outputPath, String lineEnding) {
+    private DiffOperation(PrintStream logger, Consumer<PrintStream> helpCallback, boolean verbose, boolean summary, InputPath aPath, InputPath bPath, String aPrefix, String bPrefix, boolean autoHeader, int context, OutputPath outputPath, String lineEnding, Pattern ignorePattern) {
         super(logger, helpCallback, verbose);
         this.summary = summary;
         this.aPath = aPath;
@@ -51,6 +53,7 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
         this.context = context;
         this.outputPath = outputPath;
         this.lineEnding = lineEnding;
+        this.ignorePattern = ignorePattern;
     }
 
     public static Builder builder() {
@@ -210,9 +213,9 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
     }
 
     public void doDiff(FileCollector patches, DiffSummary summary, Set<String> aEntries, Set<String> bEntries, LinesReader aFunc, LinesReader bFunc, int context, boolean autoHeader) {
-        List<String> added = bEntries.stream().filter(e -> !aEntries.contains(e)).sorted().collect(Collectors.toList());
-        List<String> common = aEntries.stream().filter(bEntries::contains).sorted().collect(Collectors.toList());
-        List<String> removed = aEntries.stream().filter(e -> !bEntries.contains(e)).sorted().collect(Collectors.toList());
+        List<String> added = bEntries.stream().filter(this::shouldPatch).filter(e -> !aEntries.contains(e)).sorted().collect(Collectors.toList());
+        List<String> common = aEntries.stream().filter(this::shouldPatch).filter(bEntries::contains).sorted().collect(Collectors.toList());
+        List<String> removed = aEntries.stream().filter(this::shouldPatch).filter(e -> !bEntries.contains(e)).sorted().collect(Collectors.toList());
         String aPrefix = StringUtils.appendIfMissing(StringUtils.isEmpty(this.aPrefix) ? "a" : this.aPrefix, "/");
         String bPrefix = StringUtils.appendIfMissing(StringUtils.isEmpty(this.bPrefix) ? "b" : this.bPrefix, "/");
         for (String file : added) {
@@ -304,6 +307,14 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
         return patchFile.toLines(autoHeader);
     }
 
+    private boolean shouldPatch(String file) {
+        if (ignorePattern != null && ignorePattern.matcher(file).matches()) {
+            verbose("Skipping %s", file);
+            return false;
+        }
+        return true;
+    }
+
     public static class DiffSummary {
 
         public int unchangedFiles;
@@ -350,6 +361,7 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
         private String aPrefix = "a/";
         private String bPrefix = "b/";
         private String lineEnding = System.lineSeparator();
+        private Pattern ignorePattern;
 
         private Builder() {
         }
@@ -462,6 +474,16 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
             return this;
         }
 
+        public Builder ignorePattern(String regex) {
+            this.ignorePattern = Pattern.compile(regex);
+            return this;
+        }
+
+        public Builder ignorePattern(Pattern pattern) {
+            this.ignorePattern = pattern;
+            return this;
+        }
+
         public DiffOperation build() {
             if (aPath == null) {
                 throw new IllegalStateException("aPath not set.");
@@ -472,7 +494,7 @@ public class DiffOperation extends CliOperation<DiffOperation.DiffSummary> {
             if (outputPath == null) {
                 throw new IllegalStateException("output not set.");
             }
-            return new DiffOperation(logger, helpCallback, verbose, summary, aPath, bPath, aPrefix, bPrefix, autoHeader, context, outputPath, lineEnding);
+            return new DiffOperation(logger, helpCallback, verbose, summary, aPath, bPath, aPrefix, bPrefix, autoHeader, context, outputPath, lineEnding, ignorePattern);
         }
 
     }

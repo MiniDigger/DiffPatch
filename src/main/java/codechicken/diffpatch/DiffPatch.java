@@ -18,6 +18,7 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static java.util.Arrays.asList;
 
@@ -56,6 +57,9 @@ public class DiffPatch {
         OptionSpec<ArchiveFormat> archiveOpt = parser.acceptsAll(asList("A", "archive"), "Treat output as an archive. Allows printing multi-output to STDOUT.")//
                 .withRequiredArg()//
                 .withValuesConvertedBy(new ArchiveFormatValueConverter());
+        OptionSpec<String> ignoreOpt = parser.acceptsAll(asList("i", "ignore"), "Pattern of files to ignore in operations")
+                .withOptionalArg()
+                .ofType(String.class);
 
         //Patch specific
         OptionSpec<Void> doPatchOpt = parser.acceptsAll(asList("p", "patch"), "Does a Patch operation.");
@@ -97,6 +101,11 @@ public class DiffPatch {
         boolean summary = optSet.has(summaryOpt);
         List<String> arguments = optSet.valuesOf(nonOptions);
 
+        Pattern ignorePattern = null;
+        if (optSet.has(ignoreOpt)) {
+            ignorePattern = Pattern.compile(ignoreOpt.value(optSet));
+        }
+
         if (arguments.size() != 2) {
             logger.println("Expected 2 arguments, got: " + arguments.size());
             parser.printHelpOn(logger);
@@ -133,6 +142,7 @@ public class DiffPatch {
                     .summary(summary)
                     .autoHeader(optSet.has(autoHeaderOpt))
                     .context(optSet.valueOf(contextOpt))
+                    .ignorePattern(ignorePattern)
                     .build();
         } else if (optSet.has(doPatchOpt)) {
 
@@ -177,6 +187,7 @@ public class DiffPatch {
                     .maxOffset(optSet.valueOf(offsetOpt))
                     .mode(optSet.valueOf(modeOpt))
                     .patchesPrefix(optSet.valueOf(patchPrefix))
+                    .ignorePattern(ignorePattern)
                     .build();
         } else {
             logger.println("Expected --diff or --patch.");
